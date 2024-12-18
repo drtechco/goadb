@@ -1,6 +1,6 @@
 package wire
 
-import "github.com/drtechco/goadb/internal/errors"
+import "github.com/zach-klippenstein/goadb/internal/errors"
 
 const (
 	// Chunks cannot be longer than 64k.
