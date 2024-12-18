@@ -1,14 +1,14 @@
 package adb
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/zach-klippenstein/goadb/internal/errors"
+	"github.com/zach-klippenstein/goadb/wire"
 	"io"
 	"os"
 	"strings"
 	"time"
-
-	"github.com/zach-klippenstein/goadb/internal/errors"
-	"github.com/zach-klippenstein/goadb/wire"
 )
 
 // MtimeOfClose should be passed to OpenWrite to set the file modification time to the time the Close
@@ -86,6 +86,7 @@ func (c *Device) DeviceInfo() (*DeviceInfo, error) {
 RunCommand runs the specified commands on a shell on the device.
 
 From the Android docs:
+
 	Run 'command arg1 arg2 ...' in a shell on the device, and return
 	its output and error streams. Note that arguments must be separated
 	by spaces. If an argument contains a space, it must be quoted with
@@ -93,6 +94,7 @@ From the Android docs:
 	will go very wrong.
 
 	Note that this is the non-interactive version of "adb shell"
+
 Source: https://android.googlesource.com/platform/system/core/+/master/adb/SERVICES.TXT
 
 This method quotes the arguments for you, and will return an error if any of them
@@ -126,13 +128,58 @@ func (c *Device) RunCommand(cmd string, args ...string) (string, error) {
 	return string(resp), wrapClientError(err, c, "RunCommand")
 }
 
+func (c *Device) RunCommandV2(cmd string, args ...string) (int, string, string, error) {
+	// Create buffers to capture stdout and stderr
+	var stdoutBuf, stderrBuf bytes.Buffer
+
+	// Run the command with our buffer writers
+	exitCode, err := c.RunCommandV2WithStd(&stdoutBuf, &stderrBuf, cmd, args...)
+
+	// Return the captured output and any error
+	// Note: We return the string output regardless of error status
+	// since partial output might still be useful for debugging
+	return exitCode, stdoutBuf.String(), stderrBuf.String(), err
+}
+
+func (c *Device) RunCommandV2WithStd(stdout io.Writer, stderr io.Writer, cmd string, args ...string) (int, error) {
+	cmd, err := prepareCommandLine(cmd, args...)
+	if err != nil {
+		return -1, wrapClientError(err, c, "RunCommand")
+	}
+
+	conn, err := c.dialDevice()
+	if err != nil {
+		return -1, wrapClientError(err, c, "RunCommand")
+	}
+	defer conn.Close()
+	/*
+		shell,v2,TERM=xterm-256color,raw:ls
+	*/
+	req := fmt.Sprintf("shell,v2,TERM=xterm-256color,raw:%s", cmd)
+
+	// Shell responses are special, they don't include a length header.
+	// We read until the stream is closed.
+	// So, we can't use conn.RoundTripSingleResponse.
+	if err = conn.SendMessage([]byte(req)); err != nil {
+		return -1, wrapClientError(err, c, "RunCommand")
+	}
+	if _, err = conn.ReadStatus(req); err != nil {
+		return -1, wrapClientError(err, c, "RunCommand")
+	}
+
+	exitCode, err := conn.ReadUntilEofV2WithStd(stdout, stderr)
+	return exitCode, err
+}
+
 /*
 Remount, from the official adb command’s docs:
+
 	Ask adbd to remount the device's filesystem in read-write mode,
 	instead of read-only. This is usually necessary before performing
 	an "adb sync" or "adb push" request.
 	This request may not succeed on certain builds which do not allow
 	that.
+
 Source: https://android.googlesource.com/platform/system/core/+/master/adb/SERVICES.TXT
 */
 func (c *Device) Remount() (string, error) {

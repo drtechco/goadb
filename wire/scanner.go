@@ -41,7 +41,7 @@ type Scanner interface {
 	StatusReader
 	ReadMessage() ([]byte, error)
 	ReadUntilEof() ([]byte, error)
-
+	ReadUntilEofV2WithStd(stdout  io.Writer, stderr  io.Writer) (int,error)
 	NewSyncScanner() SyncScanner
 }
 
@@ -76,6 +76,16 @@ func (s *realScanner) ReadUntilEof() ([]byte, error) {
 	}
 	return data, nil
 }
+
+func (s *realScanner) ReadUntilEofV2WithStd(stdout  io.Writer, stderr  io.Writer) (int,error) {
+	exitCode, err :=DecodeDataFromReader(s.reader, stdout, stderr)
+	if err != nil {
+		return exitCode, err
+	}
+	return exitCode, nil
+}
+
+
 
 func (s *realScanner) NewSyncScanner() SyncScanner {
 	return NewSyncScanner(s.reader)

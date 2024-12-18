@@ -5,7 +5,7 @@ import (
 	"io"
 	"regexp"
 	"sync"
-
+	"encoding/binary"
 	"github.com/zach-klippenstein/goadb/internal/errors"
 )
 
@@ -98,4 +98,137 @@ func (c *multiCloseable) Close() error {
 		c.err = c.ReadWriteCloser.Close()
 	})
 	return c.err
+}
+
+func DecodeV2Data(data []byte, stdout, stderr io.Writer) (int, error) {
+	var exitCode int
+	offset := 0
+
+	for offset < len(data) {
+		// 每个数据包的最小长度是 5 字节：1 字节 packetId + 4 字节数据长度
+		if offset+5 > len(data) {
+			if stdout != nil {
+				stdout.Write(data[offset:])
+			}
+			break
+		}
+
+		// 读取 packetId 和数据长度
+		packetId := data[offset]
+		dataLen := binary.LittleEndian.Uint32(data[offset+1 : offset+5])
+
+		// 检查数据包是否完整
+		if offset+5+int(dataLen) > len(data) {
+			if stdout != nil {
+				stdout.Write(data[offset:])
+			}
+			break
+		}
+
+		// 获取数据内容
+		packetData := data[offset+5 : offset+5+int(dataLen)]
+		offset += 5 + int(dataLen)
+
+		// 根据 packetId 处理不同的内容
+		switch packetId {
+		case 1: // stdout
+			if stdout != nil {
+				if _, err := stdout.Write(packetData); err != nil {
+					return exitCode, fmt.Errorf("failed to write to stdout: %v", err)
+				}
+			}
+		case 2: // stderr
+			if stderr != nil {
+				if _, err := stderr.Write(packetData); err != nil {
+					return exitCode, fmt.Errorf("failed to write to stderr: %v", err)
+				}
+			}
+		case 3: // exit code
+			if len(packetData) > 0 {
+				exitCode = int(packetData[0])
+			}
+		default:
+		 	return 0, errors.Errorf(errors.ParseError,"unknown packet ID: %d", packetId)
+		}
+	}
+
+	return exitCode, nil
+}
+
+func DecodeDataFromReader(reader io.Reader, stdout, stderr io.Writer) (int, error) {
+	var exitCode int
+	offset := 0
+
+	// 用于存储读取到的数据
+	buf := make([]byte, 4096) // 可以根据需要调整缓冲区大小
+
+	// 读取数据
+	for {
+		n, err := reader.Read(buf)
+		if err != nil && err != io.EOF {
+			return exitCode, fmt.Errorf("failed to read data: %v", err)
+		}
+
+		// 如果读取的数据为空并且已经是 EOF，退出
+		if n == 0 && err == io.EOF {
+			break
+		}
+
+		// 处理读取到的部分数据
+		data := buf[:n]
+		for offset < len(data) {
+			// 每个数据包的最小长度是 5 字节：1 字节 packetId + 4 字节数据长度
+			if offset+5 > len(data) {
+				if stdout != nil {
+					stdout.Write(data[offset:])
+				}
+				break
+			}
+
+			// 读取 packetId 和数据长度
+			packetId := data[offset]
+			dataLen := binary.LittleEndian.Uint32(data[offset+1 : offset+5])
+
+			// 检查数据包是否完整
+			if offset+5+int(dataLen) > len(data) {
+				if stdout != nil {
+					stdout.Write(data[offset:])
+				}
+				break
+			}
+
+			// 获取数据内容
+			packetData := data[offset+5 : offset+5+int(dataLen)]
+			offset += 5 + int(dataLen)
+
+			// 根据 packetId 处理不同的内容
+			switch packetId {
+			case 1: // stdout
+				if stdout != nil {
+					if _, err := stdout.Write(packetData); err != nil {
+						return exitCode, fmt.Errorf("failed to write to stdout: %v", err)
+					}
+				}
+			case 2: // stderr
+				if stderr != nil {
+					if _, err := stderr.Write(packetData); err != nil {
+						return exitCode, fmt.Errorf("failed to write to stderr: %v", err)
+					}
+				}
+			case 3: // exit code
+				if len(packetData) > 0 {
+					exitCode = int(packetData[0])
+				}
+			default:
+				return 0, errors.Errorf(errors.ParseError,"unknown packet ID: %d", packetId)
+			}
+		}
+
+		// 如果已经到了 EOF，结束循环
+		if err == io.EOF {
+			break
+		}
+	}
+
+	return exitCode, nil
 }
