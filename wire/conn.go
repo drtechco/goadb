@@ -1,5 +1,4 @@
 package wire
-
 import (
 	"github.com/zach-klippenstein/goadb/internal/errors"
 )
@@ -14,6 +13,7 @@ const (
 Conn is a normal connection to an adb server.
 
 For most cases, usage looks something like:
+
 	conn := wire.Dial()
 	conn.SendMessage(data)
 	conn.ReadStatus() == StatusSuccess || StatusFailure
