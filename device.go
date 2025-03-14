@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time" 
+	"time"
 )
 
 // MtimeOfClose should be passed to OpenWrite to set the file modification time to the time the Close
@@ -294,7 +294,6 @@ func prepareCommandLine(cmd string, args ...string) (string, error) {
 	if isBlank(cmd) {
 		return "", errors.AssertionErrorf("command cannot be empty")
 	}
-
 	for i, arg := range args {
 		if strings.ContainsRune(arg, '"') {
 			return "", errors.Errorf(errors.ParseError, "arg at index %d contains an invalid double quote: %s", i, arg)
@@ -303,11 +302,51 @@ func prepareCommandLine(cmd string, args ...string) (string, error) {
 			args[i] = fmt.Sprintf("\"%s\"", arg)
 		}
 	}
-
 	// Prepend the command to the args array.
 	if len(args) > 0 {
 		cmd = fmt.Sprintf("%s %s", cmd, strings.Join(args, " "))
 	}
 
 	return cmd, nil
+}
+
+func (c *Device) Pull(remotePath string, localFile io.Writer) error {
+	if remotePath == "" {
+		return errors.Errorf(errors.AssertionError, "remotePath cannot be empty")
+	}
+	if localFile == nil {
+		return errors.Errorf(errors.AssertionError, "localFile cannot be nil")
+	}
+	info, err := c.Stat(remotePath)
+	if err != nil {
+		return err
+	}
+	remoteFile, err := c.OpenRead(remotePath)
+	if err != nil {
+		return err
+	}
+	defer remoteFile.Close()
+	if _, err := io.CopyN(localFile, remoteFile, int64(info.Size)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Device) Push(localFile io.Reader, remotePath string) error {
+	if remotePath == "" {
+		return errors.Errorf(errors.AssertionError, "remotePath cannot be empty")
+	}
+	if localFile == nil {
+		return errors.Errorf(errors.AssertionError, "localFile cannot be nil")
+	}
+	mtime := time.Now()
+	writer, err := c.OpenWrite(remotePath,  os.FileMode(0x666), mtime)
+	if err != nil {
+	 	return err
+	}
+	defer writer.Close()
+	if _, err := io.Copy(writer, localFile); err != nil {
+		return err
+	}
+	return nil
 }
