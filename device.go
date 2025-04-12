@@ -141,6 +141,18 @@ func (c *Device) RunCommandV2(cmd string, args ...string) (int, string, string, 
 	return exitCode, stdoutBuf.String(), stderrBuf.String(), err
 }
 
+func (c *Device) Root() (string, error) {
+	conn, err := c.dialDevice()
+	if err != nil {
+		return "", wrapClientError(err, c, "Root")
+	}
+	defer conn.Close()
+
+	resp, err := conn.RoundTripSingleResponse([]byte("root:"))
+	return string(resp), wrapClientError(err, c, "Root")
+
+}
+
 func (c *Device) RunCommandV2WithStd(stdout io.Writer, stderr io.Writer, cmd string, args ...string) (int, error) {
 	cmd, err := prepareCommandLine(cmd, args...)
 	if err != nil {
@@ -340,9 +352,9 @@ func (c *Device) Push(localFile io.Reader, remotePath string) error {
 		return errors.Errorf(errors.AssertionError, "localFile cannot be nil")
 	}
 	mtime := time.Now()
-	writer, err := c.OpenWrite(remotePath,  os.FileMode(0x666), mtime)
+	writer, err := c.OpenWrite(remotePath, os.FileMode(0x666), mtime)
 	if err != nil {
-	 	return err
+		return err
 	}
 	defer writer.Close()
 	if _, err := io.Copy(writer, localFile); err != nil {
